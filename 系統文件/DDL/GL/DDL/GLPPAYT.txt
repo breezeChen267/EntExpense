@@ -1,0 +1,27 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYT                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYTR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－請款種類檔                                                                                                                                                            
+  RECORD LENGTH      :    70                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A EXPTYPE     B     2  0 A     1     2 請款種類                                                                                                                                                    
+      ITEMDES     B    22  0 O     3    24 請款種類名稱                                                                                                                                                
+      PAYCODE     B     1  0 A    25    25 指定付款日期碼                                                                                                                                              
+                                            空白:按規定
+                                            Y   :特殊專案                                                                                                                                      
+      PAYMHD      B     1  0 A    26    26 付款方式                                                                                                                                                    
+                                            空白:匯款 
+                                            1   :支票                                                                                                                                       
+      ACCTPROC    B     1  0 A    27    27 帳務處理碼                                                                                                                                                  
+                                            SPACE :出應付及實支傳票
+                                            A     :只出實支傳票  
+                                            N     :不在此處產生傳票                                                                                                       
+      PAYACCT     B    10  0 A    28    37 付款銀行會計科目                                                                                                                                            
+      ACPTER1     B    10  0 A    38    47 受款人一                                                                                                                                                    
+      ACPTER2     B    10  0 A    48    57 受款人二                                                                                                                                                    
+      ACPTER3     B    10  0 A    58    67 受款人三                                                                                                                                                    
+      ACPTTYP     B     3  0 A    68    70 受款人種類                                                                                                                                                  
+ *=========================================================================================*                                                                                                           
+

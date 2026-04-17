@@ -1,0 +1,32 @@
+  DATE : 91/10/30             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPACCT                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : ACCTR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－會計科目資料                                                                                                                                                          
+  RECORD LENGTH      :   142                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A COMPID      B     4  0 A     1     4 公司別∕管理別                                                                                                                                              
+  2 A ACCTNUM     B    10  0 A     5    14 科目代碼 
+                                            REF : 以"5850"+CKMCUUR.CK0600
+                                                    READ GLPACCT,
+                                                  當 GLPACCT.COMPID = "5850" AND
+                                                     GLPACCT.ACCTNUM = CKMCURR.CK0600 
+                                                    就將 GLPACCT.ACCTDE2 帶到畫面                                                                                                                                                   
+  3 A DEPTNUM     B     3  0 A    15    17 部門別                                                                                                                                                      
+      ACCTDE1     B    42  0 O    18    59 科目名稱全稱                                                                                                                                                
+      ACCTDE2     B    22  0 O    60    81 科目名稱簡稱                                                                                                                                                
+      ACCTDE3     B    22  0 O    82   103 科目名稱明細                                                                                                                                                
+      ACCTATR     B     1  0 A   104   104 科目屬性                                                                                                                                                    
+      DCCODE      B     1  0 A   105   105 借∕貸                                                                                                                                                      
+      WRTCODE     B     1  0 A   106   106 沖銷方式                                                                                                                                                    
+      CATGTY1     B     2  0 A   107   108 分類碼種類１                                                                                                                                                
+      CATGTY2     B     2  0 A   109   110 分類碼種類２                                                                                                                                                
+      DEFIND      B     1  0 A   111   111 遞延科目                                                                                                                                                    
+      NEWACCT     B    10  0 A   112   121 新科目代碼                                                                                                                                                  
+      EXPDATE     B     6  0 A   122   127 科目停用日                                                                                                                                                  
+      LSTMANT     B     5  0 A   128   132 最後修改人                                                                                                                                                  
+      CHGDATE     B     6  0 A   133   138 最後修改日期                                                                                                                                                
+      CHGTIME     B     4  0 A   139   142 最後修改時間                                                                                                                                                
+ *=========================================================================================*                                                                                                           
+

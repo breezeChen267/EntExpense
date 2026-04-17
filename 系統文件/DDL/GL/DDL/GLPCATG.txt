@@ -1,0 +1,14 @@
+  DATE : 92/07/07              ＦＩＬＥ　　ＬＡＹＯＵＴ                    PAGE :    1                                                                                                                 
+  FILE               : GLPCATG                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : CATGR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION :  總帳會計－分類代碼資料                                                                                                                                                         
+  RECORD LENGTH      :    43                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A CATGID      B     1  0 A     1     1  類別                                                                                                                                                       
+  2 A CATGTYP     B    10  0 A     2    11  種類                                                                                                                                                       
+  3 A CATGCOD     B    10  0 A    12    21  代碼                                                                                                                                                       
+      CATGRMK     B    22  0 O    22    43  說明                                                                                                                                                       
+ *=========================================================================================*                                                                                                           
+

@@ -1,0 +1,14 @@
+# .gitignore
+node_modules/
+.angular/
+dist/
+bin/
+obj/
+*.user
+*.suo
+*.log
+.vscode/
+.idea/
+.vs/
+.env
+.gemini/

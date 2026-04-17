@@ -1,0 +1,20 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYM                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYMR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 公司自有及水電專戶檔                                                                                                                                                            
+  RECORD LENGTH      :   112                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A COMPID      B     4  0 A     1     4 公司別∕管理別                                                                                                                                              
+      ACCTNUM1    B    10  0 A     5    14 自有專戶會計科目                                                                                                                                            
+      BANKNO1     B    10  0 A    15    24 自有專戶銀行代碼                                                                                                                                            
+      ACCTNO1     B    16  0 A    25    40 自有專戶銀行帳號                                                                                                                                            
+      ACCTNUM2    B    10  0 A    41    50 水電專戶會計科目                                                                                                                                            
+      BANKNO2     B    10  0 A    51    60 水電專戶銀行代碼                                                                                                                                            
+      ACCTNO2     B    16  0 A    61    76 水電專戶銀行帳號                                                                                                                                            
+      ACCTNUM3    B    10  0 A    77    86 零用金撥補專戶科目                                                                                                                                          
+      BANKNO3     B    10  0 A    87    96 零用金撥補銀行代碼                                                                                                                                          
+      ACCTNO3     B    16  0 A    97   112 零用金撥補銀行帳號                                                                                                                                          
+ *=========================================================================================*                                                                                                           
+

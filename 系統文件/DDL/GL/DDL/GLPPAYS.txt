@@ -1,0 +1,13 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYS                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYSR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－憑證種類檔                                                                                                                                                            
+  RECORD LENGTH      :    32                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A SHTID       B     2  0 A     1     2 憑證種類                                                                                                                                                    
+      SHTDESC     B    20  0 O     3    22 憑證種類名稱                                                                                                                                                
+      SHTCHK      B    10  0 A    23    32 資料來源檔                                                                                                                                                  
+ *=========================================================================================*                                                                                                           
+

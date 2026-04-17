@@ -1,0 +1,12 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYR                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYRR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－比例組合代碼檔                                                                                                                                                        
+  RECORD LENGTH      :    26                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A SPRID       B     4  0 A     1     4 分攤比例組合                                                                                                                                                
+      ITEMDES     B    22  0 O     5    26 比例組合名稱                                                                                                                                                
+ *=========================================================================================*                                                                                                           
+

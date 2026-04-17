@@ -1,0 +1,24 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPCOMP                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : COMPR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－作業公司資料                                                                                                                                                          
+  RECORD LENGTH      :   253                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A COMPID      B     4  0 A     1     4 公司別∕管理別                                                                                                                                              
+      ADMTYPE     B     1  0 A     5     5 類別                                                                                                                                                        
+      COMPNAM     B    42  0 O     6    47 公司名稱                                                                                                                                                    
+      COMPBNM     B    26  0 O    48    73 公司簡稱                                                                                                                                                    
+      CURYEAR     B     2  0 A    74    75 作業年度                                                                                                                                                    
+      CURPERD     B     2  0 A    76    77 作業當期                                                                                                                                                    
+      PERDCNT     B     2  0 S    78    79 期數                                                                                                                                                        
+                                            期數０１－１３                                                                                                                                             
+      PDSTEND     B   156  0 A    80   235 開始日－截止日                                                                                                                                              
+      BDGYEAR     B     2  0 A   236   237 預算年度                                                                                                                                                    
+      BDGSTS      B     1  0 A   238   238 預算狀態                                                                                                                                                    
+      LSTMANT     B     5  0 A   239   243 最後修改人                                                                                                                                                  
+      CHGDATE     B     6  0 A   244   249 最後修改日期                                                                                                                                                
+      CHGTIME     B     4  0 A   250   253 最後修改時間                                                                                                                                                
+ *=========================================================================================*                                                                                                           
+

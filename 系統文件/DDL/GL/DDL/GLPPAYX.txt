@@ -1,0 +1,13 @@
+  DATE : 91/07/05             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYX                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYXR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－費用類別說明檔                                                                                                                                                            
+  RECORD LENGTH      :   28                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A EXPID       B    10  0 A     1    10 費用類別                                                                                                                                                    
+  2 A ITEMNUM     B     4  0 S    11    14 序號                                                                                                                                                    
+      ITEMDES     B    14  0 O    15    28 費用說明                                                                                                                                                                                                                                                                                      
+ *=========================================================================================*                                                                                                           
+

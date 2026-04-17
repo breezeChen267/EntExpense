@@ -1,0 +1,28 @@
+  DATE : 91/10/29             ＦＩＬＥ　　ＬＡＹＯＵＴ                   PAGE :    1                                                                                                                   
+  FILE               : GLPPAYO                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : PAYOR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 總帳會計－請款類別申請權限                                                                                                                                                      
+  RECORD LENGTH      :     9                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A EXPTYPE     B     2  0 A     1     2 請款種類                                                                                                                                                    
+  2 A COMPID      B     4  0 A     3     6 公司別                                                                                                                                                      
+                                            **** 代表所有分公司                                                                                                                                        
+  3 A DEPTNUM     B     3  0 A     7     9 部門別                                                                                                                                                      
+                                            **** 代表所有部門 
+                                           REF:(1)以請款種類+費用歸屬人公司別+費用歸屬人部門別
+                                                  READ GLPPAYO
+                                               (2)找到-->可申請
+                                                  找不到 -->以請款種類+"****"+"***"
+                                                              READ GLPPAYO
+                                               (3)找到-->可申請
+                                                  找不到 -->以請款種類+"****"+費用歸屬人部門別
+                                                              READ GLPPAYO 
+                                               (4)找到-->可申請
+                                                  找不到 -->以請款種類+費用歸屬人公司別+"***"
+                                                              READ GLPPAYO 
+                                               (5)找到-->可申請
+                                                  找不到 -->不可申請
+ *=========================================================================================*                                                                                                           
+

@@ -1,0 +1,15 @@
+  DATE : 91/07/05             ⒃⒆②⒂②⑾㈢⑤€⑩                   PAGE :    1                                                                                                                   
+  FILE               : GLPDEPT                              PFILE       :                                                                                                                              
+  FILE TYPE          : Physical File                        ACCESS PATH : Keyed   ( Unique )                                                                                                           
+  RECORD FORMAT      : DEPTR                                LIBRARY     : GLDLIB                                                                                                                       
+  RECORD DESCRIPTION : 羆眀穦璸⌒场戈                                                                                                                                                              
+  RECORD LENGTH      :    38                                                                                                                                                                           
+  Key  Name      Atr   Length   From   To  Column heading/Description                                                                                                                                  
+  --- ---------- ---  --------- ----  ---- -------------------------------------------------                                                                                                           
+  1 A COMPID      B     4  0 A     1     4 そ恨瞶                                                                                                                                              
+  2 A DEPTNUM     B     3  0 A     5     7 场                                                                                                                                                      
+      DEPTNAM     B    24  0 O     8    31 场嘿                                                                                                                                                    
+      NEWCOMP     B     4  0 A    32    35 穝そ                                                                                                                                                    
+      NEWDEPT     B     3  0 A    36    38 穝场                                                                                                                                                    
+ *=========================================================================================*                                                                                                           
+

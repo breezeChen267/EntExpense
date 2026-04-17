@@ -1,0 +1,1487 @@
+'************************************************
+'程式名稱：PayFormUpdateWFPPAYE.vbs
+'程式功能：付款申請單--更新 AS/400 資料庫程式
+'修改日期：20260326 台幣費用串接博格簽核
+'************************************************
+formname = "付款申請單"
+
+Dim DataArray(25)
+
+Dim paymhdname(2)
+paymhdname(0) = "現金"
+paymhdname(1) = "匯款"
+paymhdname(2) = "支票"
+
+Dim checmhdname(4)
+checmhdname(0) = ""
+checmhdname(1) = "郵寄"
+checmhdname(2) = "親領"
+checmhdname(3) = "送存"
+checmhdname(4) = "轉交申請人"
+
+'讀取日期
+N = NOW
+EEEE = Year(N) - 1911
+MM = Right("00" & Month(N), 2)
+DD = Right("00" & Day(N), 2)
+HH = Right("00" & Hour(N), 2)
+NN = Right("00" & Minute(N), 2)
+
+EEEEMMDD = EEEE & MM & DD
+
+'建立 File System 物件
+Set fs = CreateObject ("Scripting.FileSystemObject")
+
+if NN = "00" then
+	WriteLogFile("現在時間 " & HH & " 點整")
+end if
+
+' AS400 物件
+'AS400HostName = "TAIPEI5"
+AS400HostName = "10.72.200.7"
+
+AS400UserID = "EIPDBA"
+AS400Password = "INTRANET"
+AS400ConnectionString = "Provider=IBMDA400;Data Source=" & AS400HostName
+
+Set AS400Connection = CreateObject("ADODB.Connection")
+Set AS400RecordSet = CreateObject("ADODB.Recordset")
+
+AS400Connection.Open AS400ConnectionString, AS400UserID, AS400Password
+
+'wscript.echo("傳送開始==")
+
+' 建立 SQL 資料連結物件
+Set objConnSQLDB = CreateObject("ADODB.Connection")
+'SQLConnectionString = "driver={SQL Server};server=SQLDB;uid=workflow;pwd=Fl201Ow18;database=FINDB"
+SQLConnectionString = "driver={SQL Server};server=10.172.207.77;uid=workflow;pwd=Fl201Ow18;database=FINDB"
+
+
+' 建立 ADO 連結
+' 建立 ADO 資料集合物件
+Set objRS = CreateObject("ADODB.Recordset")
+Set objRS2 = CreateObject("ADODB.Recordset")
+Set objRS3 = CreateObject("ADODB.Recordset")
+
+' 開啟 SQL 連線
+objConnSQLDB.Open SQLConnectionString 
+
+' 分公司申請 A1.零用金, 免會計複核, 直接送 AS/400
+sql = "UPDATE FINDB..WFPPAYE SET APLSTAT='S' WHERE APLSTAT='4' AND APLBRHCOD <> '5850' AND EXPTYPE='A1'"
+objConnSQLDB.Execute sql
+
+' 其他已核准資料, 更新狀態為等待會計審核
+sql = "UPDATE FINDB..WFPPAYE SET APLSTAT='5' WHERE APLSTAT='4' AND NOT(APLBRHCOD <> '5850' AND EXPTYPE='A1')"
+objConnSQLDB.Execute sql
+
+
+' 傳送TAIPEI5\GLOLIB\GLPAYWEBRQ
+'SendGLPAYWEBRQ_A "0909000010", "I"   '傳送Q
+'SendGLPAYWEBRQ_B "0909000011C01090911111130101584267F"   '傳送Q
+SendGLPAYWEBRQ_EPAY   '送GDF資料
+'SendGLPAYWEBRQ_production "0908000017", "G"
+'ReceiveGLPAYWEBSQFromTest		'收我送的
+	
+
+' 接收 TAIPEI5\GLOLIB\GLPAYUSQ 資料, 並更新 SQLDB\FINDB\GLPPAYU 資料
+ReceiveGLPAYUSQ
+
+' 更新 TAIPEI5/GLDLIB/WFPPAYE, WFPPAYEA, WFPPAYED, WFPPAYEH, WFPPAYS, 並傳送更新通知
+UpdateAS400
+
+' 接收 TAIPEI5\GLOLIB\GLPAYWEBSQ 資料, 並更新 SQLDB\FINDB\WFPPAYE APLSTAT 狀態值
+ReceiveGLPAYWEBSQ
+
+AS400Connection.Close
+Set AS400RecordSet = Nothing
+Set AS400Conection = Nothing
+
+' 關閉 SQL 連線
+objConnSQLDB.Close
+
+' 移除 SQL 資料連結物件
+Set objConnSQLDB = Nothing
+Set objRS = Nothing
+Set objRS2 = Nothing
+Set objRS3 = Nothing
+set fs = nothing
+
+'************************************************
+'更新 TAIPEI5/GLDLIB/WFPPAYE, WFPPAYEA, WFPPAYED, WFPPAYEH, WFPPAYS, 並傳送更新通知
+'************************************************
+Sub UpdateAS400()
+	'################
+	' 讀取 SQL Server/AS400DB(WFPPAYE) WRITEOK IS NULL 逐筆寫入 as/400
+	'################
+	sql = "SELECT * FROM FINDB.dbo.WFPPAYE WHERE NOT(PERDATE IS NULL) AND APLSTAT ='S'"
+	objRS.Open sql, objConnSQLDB, 1, 1
+	If Not objRS.EOF Then
+	c1 = 0
+	While Not objRS.EOF
+
+		errStatus = 0
+
+		aplno = objRS("APLNO")
+		WriteLogFile("傳送付款申請單資料開始 APLNO:"& aplno)	
+		exptype = trim(objRS("EXPTYPE"))
+		catgcd1 = left(trim(objRS("CATGCD1")) & "    ", 4)
+		' 2009-08-19 財務部育儒同意, 因 APLDESC 傳送中文全形文字問題, 所以停止傳送 APLDESC 內容
+		apldesc = ""
+		' apldesc =  left(Trim(REPLACE(objRS("APLDESC"), "＄", "$")), 20)
+		' apldesc =  REPLACE(apldesc, "＆", "&")
+		' apldesc =  REPLACE(apldesc, "～", "~")
+		' WriteLogFile("內容說明：" & apldesc)
+
+		' 付款日期
+		tmp_PAYDATE = Trim(objRS("PAYDATE"))
+		If IsNull(tmp_PAYDATE) OR Len(tmp_PAYDATE) <= 0 Then
+			tmp_PAYDATE = ""
+		else
+			tmp_PAYDATE = RIGHT("00" & tmp_PAYDATE, 8)
+		End If
+
+		' 沖銷 KEY
+		tmp_WRTKEY1 = Trim(objRS("WRTKEY1"))
+		If IsNull(tmp_WRTKEY1) Then
+		tmp_WRTKEY1 = ""
+		End If
+
+		' 零用金撥補號
+		tmp_CBTHNO = Trim(objRS("CBTHNO"))
+		If IsNull(tmp_CBTHNO) Then
+		tmp_CBTHNO = ""
+		End If
+
+		' 付款方式
+		tmp_PAYMHD = Trim(objRS("PAYMHD"))
+		If IsNull(tmp_PAYMHD) Then
+		tmp_PAYMHD = ""
+		End If
+
+		' 支票領取方式
+		tmp_CHECMHD = Trim(objRS("CHECMHD"))
+		If IsNull(tmp_CHECMHD) Then
+		tmp_CHECMHD = ""
+		End If
+
+		' 預定沖帳日
+		tmp_PREDATE = Trim(objRS("PREDATE"))
+		If IsNull(tmp_PREDATE) OR Len(tmp_PREDATE) <= 0 Then
+			tmp_PREDATE = ""
+		Else
+			tmp_PREDATE = RIGHT("00" & tmp_PREDATE, 8)
+		End If
+
+        ' 會計覆核人
+		acchgusr = trim(objRS("ACCHGUSR"))
+		if len(acchgusr) > 0 then
+			acchgusr = left(acchgusr, 5)
+		else
+			acchgusr = ""
+		end if
+
+		'受款人數
+		tmp_TOTPAYM = Cint(objRS("TOTPAYM"))
+		If tmp_TOTPAYM > 9 THEN
+			tmp_TOTPAYM = 0
+		End If
+	    
+
+		' ------------
+		' 更新 WFPPAYE
+		' ------------
+		AS400_sql = "SELECT * FROM GLDLIB.WFPPAYE WHERE APLNO = '" & aplno & "'"
+		AS400RecordSet.Open AS400_sql, AS400Connection, 1, 1
+		If AS400RecordSet.Eof then
+			c1= c1+1
+			' 寫入新記錄
+			Set AS400Command = CreateObject("ADODB.Command")
+			AS400Command.ActiveConnection = AS400Connection
+			sql = "INSERT INTO GLDLIB.WFPPAYE (" & _
+				  "APLNO" & _
+				  ",APLDATE" & _
+				  ",EXPTYPE" & _
+				  ",APLAMT" & _
+				  ",APLDESC" & _
+				  ",PERDATE" & _
+				  ",APLUSR" & _
+				  ",APLUCOM" & _
+				  ",APLUCDPT" & _
+				  ",EXPUSR" & _
+				  ",EXPUCOM" & _
+				  ",EXPUDPT" & _
+				  ",TOTPAYM" & _
+				  ",TOTSHEET" & _
+				  ",TOTDESC" & _
+				  ",PAYDATE" & _
+				  ",PAYACCT" & _
+				  ",WRTKEY1" & _
+				  ",CBTHNO" & _
+				  ",PAYMHD" & _
+				  ",CHECMHD" & _
+				  ",WRTDATE" & _
+				  ",UPDATED" & _
+				  ",UPDATET" & _
+				  ",CATGCD1" & _
+				  ",WRTCOMP" & _
+				  ",AOKUSR" & _
+				  ",APLSTAT" & _
+				  ",FILLERBB) VALUES (" & _
+				  " '" & aplno & "'" & _
+				  ",'" & RIGHT("00" & TRIM(objRS("APLDATE")), 8) & "'" & _
+				  ",'" & exptype & "'" & _
+				  "," & objRS("APLAMT") & _
+				  ",'" & apldesc & "'" & _
+				  ",'" & RIGHT("00" & TRIM(objRS("PERDATE")), 8) & "'" & _
+				  ",'" & objRS("APLEMPNO") & "'" & _
+				  ",'" & objRS("APLBRHCOD") & "'" & _
+				  ",'" & objRS("APLDEPTCD") & "'" & _
+				  ",'" & objRS("USEUSER") & "'" & _
+				  ",'" & objRS("USEUCOM") & "'" & _
+				  ",'" & objRS("USEUDPT") & "'" & _
+				  "," & tmp_TOTPAYM & _
+				  "," & objRS("TOTSHEET") & _
+				  "," & TRIM(objRS("TOTDESC")) & _
+				  ",'" & tmp_PAYDATE & "'" & _
+				  ",'" & objRS("PAYACCT") & "'" & _
+				  ",'" & tmp_WRTKEY1 & "'" & _
+				  ",'" & tmp_CBTHNO & "'" & _
+				  ",'" & tmp_PAYMHD & "'" & _
+				  ",'" & tmp_CHECMHD & "'" & _
+				  ",'" & tmp_PREDATE & "'" & _
+				  ",''" & _
+				  ",''" & _
+				  ",'" & catgcd1 & "'" & _
+				  ",'" & objRS("WRTCOMP") & "'" & _
+				  ",'" & acchgusr & "'" & _
+				  ",'" & objRS("APLSTAT") & "'" & _
+				  ",'')"
+			AS400Command.CommandText = sql
+			AS400Command.Execute 
+			Set AS400Command = Nothing
+		WriteLogFile (aplno & " WFPPAYE : " & c1)
+		Else
+			WriteLogFile (aplno & " 資料已存在 GLDLIB.WFPPAYE 中, 請與 AS400 人員連絡處理.")
+			errStatus = 1
+		End If
+		AS400RecordSet.Close
+
+		' ------------
+		'更新 WFPPAYEA
+		' ------------
+		If errStatus = 0 Then
+			AS400_sql = "SELECT * FROM GLDLIB.WFPPAYEA WHERE APLNO = '" & aplno & "'"
+			AS400RecordSet.Open AS400_sql, AS400Connection, 1, 1
+			If AS400RecordSet.Eof then
+			sql = "SELECT * FROM FINDB.dbo.WFPPAYEA WHERE APLNO = '" & aplno & "'"
+			objRS2.Open sql, objConnSQLDB, 1, 1
+			If Not objRS2.EOF Then
+			c2 = 0
+			While Not objRS2.EOF
+					tmp_PAYTOBNK = Trim(objRS2("PAYTOBNK"))
+					If IsNull(tmp_PAYTOBNK) or tmp_PAYTOBNK = "薪資帳戶" or tmp_PAYTOBNK = "會計領款" or tmp_PAYTOBNK="親領" Then
+						tmp_PAYTOBNK = ""
+					end If
+
+					tmp_PAYTOACT = Trim(objRS2("PAYTOACT"))
+					If IsNull(tmp_PAYTOACT)  or tmp_PAYTOACT = "薪資帳戶" or tmp_PAYTOACT = "會計領款" or tmp_PAYTOACT="親領" Then
+						tmp_PAYTOACT = ""
+					End If
+
+					c2 = c2 + 1
+							' 寫入新記錄
+							Set AS400Command = CreateObject("ADODB.Command")
+							AS400Command.ActiveConnection = AS400Connection
+							sql = "INSERT INTO GLDLIB.WFPPAYEA (" & _
+								  "APLNO" & _
+								  ",ACPTER" & _
+								  ",APLAMT" & _
+								  ",PAYTOBNK" & _
+								  ",PAYTOACT" & _
+								  ") VALUES (" & _
+								  " '" & aplno & "'" & _
+								  ",'" & trim(objRS2("ACPTER")) & "'" & _
+								  "," & objRS2("APLAMT") & _
+								  ",'" & tmp_PAYTOBNK & "'" & _
+								  ",'" & tmp_PAYTOACT & "'" & _
+								  ")"
+							AS400Command.CommandText = sql
+							AS400Command.Execute 
+							Set AS400Command = Nothing
+
+					objRS2.MoveNext
+			Wend
+			WriteLogFile (aplno & " WFPPAYEA : " & c2)
+				End If
+			objRS2.Close
+			Else
+				WriteLogFile (aplno & " 資料已存在 GLDLIB.WFPPAYEA 中, 請與 AS400 人員連絡處理.")
+				errStatus = 1
+		End If
+			AS400RecordSet.Close
+		End If
+
+		' ------------
+		'更新 WFPPAYEH
+		' ------------
+
+		If errStatus = 0 Then
+			AS400_sql = "SELECT * FROM GLDLIB.WFPPAYEH WHERE APLNO = '" & aplno & "'"
+			AS400RecordSet.Open AS400_sql, AS400Connection, 1, 1
+			If AS400RecordSet.Eof then
+				sql = "SELECT * FROM FINDB.dbo.WFPPAYEH WHERE APLNO = '" & aplno & "'"
+				objRS2.Open sql, objConnSQLDB, 1, 1
+				If Not objRS2.EOF Then
+					c2 = 0
+					While Not objRS2.EOF
+						c2 = c2 + 1
+						' 寫入新記錄
+
+						Set AS400Command = CreateObject("ADODB.Command")
+						AS400Command.ActiveConnection = AS400Connection
+						sql = "INSERT INTO GLDLIB.WFPPAYEH (" & _
+							  "APLNO" & _
+							  ",APLSEQ" & _
+							  ",EXPID" & _
+							  ",ITEMDES" & _
+							  ",SHAREC" & _
+							  ",APLAMT" & _
+							  ",CATGCD1" & _
+							  ") VALUES (" & _
+							  " '" & aplno & "'" & _
+							  "," & objRS2("APLSEQ") & _
+							  ",'" & trim(objRS2("EXPID")) & "'" & _
+							  ",'" & left(trim(REPLACE(objRS2("ITEMDES"), "碁", "  ")), 8) & "'" & _
+							  ",'" & objRS2("SHAREC") & "'" & _
+							  "," & objRS2("APLAMT") & _
+							  ",'" & objRS2("CATGCD1") & "'" & _
+							  ")"
+
+						AS400Command.CommandText = sql
+						AS400Command.Execute 
+						Set AS400Command = Nothing
+
+						objRS2.MoveNext
+					Wend
+					WriteLogFile (aplno & " WFPPAYEH : " & c2)
+				End If
+				objRS2.Close
+			Else
+				WriteLogFile (aplno & " 資料已存在 GLDLIB.WFPPAYEH 中, 請與 AS400 人員連絡處理.")
+				errStatus = 1
+			End If
+			AS400RecordSet.Close
+		End If
+
+		' ------------
+		'更新 WFPPAYED
+		' ------------
+		WriteLogFile (" errStatus : " & errStatus & " BEFORE INSERT AS400 WFPPAYED")
+		If errStatus = 0 Then
+			AS400_sql = "SELECT * FROM GLDLIB.WFPPAYED WHERE APLNO = '" & aplno & "'"
+			AS400RecordSet.Open AS400_sql, AS400Connection, 1, 1
+			If AS400RecordSet.Eof then
+				WriteLogFile (" AS400RecordSet.Eof IS TRUE")
+				sql = "SELECT * FROM FINDB.dbo.WFPPAYED WHERE APLNO = '" & aplno & "' ORDER BY COMPID, DEPTNUM"
+				objRS2.Open sql, objConnSQLDB, 1, 1
+				WriteLogFile (" Open FINDB.dbo.WFPPAYED SUCCESS")
+				If Not objRS2.EOF Then
+					on error resume next
+					c2 = 0
+					While Not objRS2.EOF
+						WriteLogFile (" START GETDATA TO INSERT GLDLIB.WFPPAYED")
+						c2 = c2 + 1
+						' 寫入新記錄
+
+						Set AS400Command = CreateObject("ADODB.Command")
+						AS400Command.ActiveConnection = AS400Connection
+						sql = "INSERT INTO GLDLIB.WFPPAYED (" & _
+							  "APLNO" & _
+							  ",APLSEQ" & _
+							  ",COMPID" & _
+							  ",DEPTNUM" & _
+							  ",ITEMAMT" & _
+							  ") VALUES (" & _
+							  " '" & aplno & "'" & _
+							  "," & objRS2("APLSEQ") & _
+							  ",'" & objRS2("COMPID") & "'" & _
+							  ",'" & objRS2("DEPTNUM") & "'" & _
+							  "," & objRS2("ITEMAMT") & _
+							  ")"
+						AS400Command.CommandText = sql
+						AS400Command.Execute 
+						if Err.Number <> 0 then
+							WriteLogFile ("INSERT GLDLIB.WFPPAYED 失敗，錯誤:" & err.description)
+						else
+							WriteLogFile (" AS400 INSERT PROCESS DONE")
+						end if
+						Err.Clear
+						Set AS400Command = Nothing
+
+						objRS2.MoveNext
+					Wend
+					WriteLogFile (aplno & " WFPPAYED : " & c2)
+					On error GOTO 0
+				Else
+					WriteLogFile ("SQLDB.FINDB.dbo.WFPPAYED無資料可寫")
+				End If
+				objRS2.Close
+				
+			Else
+				WriteLogFile (aplno & " 資料已存在 GLDLIB.WFPPAYED 中, 請與 AS400 人員連絡處理.")
+				errStatus = 1
+			End If
+			AS400RecordSet.Close
+		End If
+
+		' ------------
+		'更新 WFPPAYES
+		' ------------
+		If errStatus = 0 Then
+			AS400_sql = "SELECT * FROM GLDLIB.WFPPAYES WHERE APLNO = '" & aplno & "'"
+			AS400RecordSet.Open AS400_sql, AS400Connection, 1, 1
+			If AS400RecordSet.Eof then
+			sql = "SELECT * FROM FINDB.dbo.WFPPAYES WHERE APLNO = '" & aplno & "'"
+			objRS2.Open sql, objConnSQLDB, 1, 1
+			If Not objRS2.EOF Then
+			c2 = 0
+			While Not objRS2.EOF
+				c2 = c2 + 1
+				tmp_SHTNO = Trim(objRS2("SHTNO"))
+				If IsNull(tmp_SHTNO) Then
+					tmp_SHTNO = ""
+				End If
+				if clrspace(tmp_SHTNO) > 15 then
+					tmp_SHTNO = "(Not Fit)"
+				end if
+
+				' 寫入新記錄
+				Set AS400Command = CreateObject("ADODB.Command")
+				AS400Command.ActiveConnection = AS400Connection
+				sql = "INSERT INTO GLDLIB.WFPPAYES (" & _
+					  "APLNO" & _
+					  ",APLSEQ" & _
+					  ",SHTID" & _
+					  ",SHTNO" & _
+					  ") VALUES (" & _
+					  " '" & aplno & "'" & _
+					  "," & objRS2("APLSEQ") & _
+					  ",'" & trim(REPLACE(objRS2("SHTID"), "碁", "  ")) & "'" & _
+					  ",'" & REPLACE(tmp_SHTNO, "碁", "  ") & "'" & _
+					  ")"
+				AS400Command.CommandText = sql
+				AS400Command.Execute 
+				Set AS400Command = Nothing
+
+				objRS2.MoveNext
+			Wend
+			WriteLogFile (aplno & " WFPPAYES : " & c2)
+		End If
+			objRS2.Close
+			Else
+				WriteLogFile (aplno & " 資料已存在 GLDLIB.WFPPAYES 中, 請與 AS400 人員連絡處理.")
+				errStatus = 1
+			End If
+			AS400RecordSet.Close
+		End If
+
+		If errStatus = 0 Then
+			'傳送 TAIPEI5\GLOLIB\GLPAYWEBRQ 資料更新通知, 並更新 SQLDB\FINDB\WFPPAYE APLSTAT 狀態值
+			SendGLPAYWEBRQ_A aplno, exptype
+			WriteLogFile("傳送更新表單的Q通知完成===APLNO:" & aplno)	
+		End If
+
+		    objRS.MoveNext
+		Wend
+	end if
+	objRS.Close
+End Sub
+
+
+'************************************************
+'傳送電子支付後續資料
+'************************************************
+Sub SendGLPAYWEBRQ_EPAY()
+   'On Error Resume Next
+    aplno = ""
+	uplempno = ""
+	puserid = ""
+	paydate = ""
+	payacct = ""
+	aplstat = ""
+	uplstate = ""
+	qdata = "" 
+
+	sqlstr = "SELECT DISTINCT B.APLNO,B.EXPTYPE,APLSTAT,UPLSTATE,UPLEMPNO,PAYDATE,B.PAYACCT FROM FINDB.dbo.WFPEPAY A INNER JOIN FINDB.dbo.WFPPAYE B ON A.APLNO = B.APLNO INNER JOIN FINDB.dbo.GLPPAYT C ON DTATYP = C.EXPTYPE  WHERE  ACCTPROC <> 'N' AND CONVERT(VARCHAR,UPLDATETIME,112) >= CONVERT(VARCHAR,GETDATE(),112) AND APLSTAT IN ('G','D','F') AND RTN400= 0 "
+	objRS.Open sqlstr, objConnSQLDB, 1, 1
+	Do While NOT objRS.EOF 
+		WriteLogFile("傳送狀態為 G,D,F 開始===")	
+		aplno = trim(objRS("APLNO"))
+		exptype = trim(objRS("EXPTYPE"))
+		uplstate = objRS("UPLSTATE")
+		uplempno = trim(objRS("UPLEMPNO"))
+		aplstat = trim(objRS("APLSTAT"))
+		paydate = trim(objRS("PAYDATE"))
+		payacct = trim(objRS("PAYACCT"))
+		
+		if uplempno = "" then
+			uplempno = space(5)
+		end if
+		if payacct = "" then
+			payacct = space(10)
+		end if
+		if paydate = "" then
+			paydate = space(8)
+		else	
+			if len(paydate) <= 7 then
+				paydate = Right("0" & paydate,8)
+			end if
+		end if
+		'請款種類非K、I開頭則更新為K
+		WriteLogFile("單號:"& aplno & "已上傳旗標="&uplstate)
+		if Cstr(uplstate) = "True" and aplstat = "G" and Left(exptype,1) <> "K" and Left(exptype,1) <> "I" then
+			datatype = "B"
+			puserid = uplempno
+			aplstat = "K"
+		'狀態為D.退件不付或F出納退件
+		elseif aplstat = "D" or aplstat = "F" then
+			datatype = "C"
+			puserid = uplempno
+			UpdateEntertainmentReturn aplno , uplempno
+		end if
+
+		if datatype <> "" then
+			qdata = aplno & datatype & paydate & payacct & puserid & aplstat & space(15)
+		
+			'送Q
+			SendGLPAYWEBRQ_B qdata
+			WriteLogFile("傳送後GLPAYWEBRQ成功=" & qdata)
+			
+			'更新已回覆AS400總帳會計系統
+			sql = "UPDATE FINDB.dbo.WFPEPAY SET RTN400 = '1' WHERE APLNO = '" & aplno & "'"
+			objConnSQLDB.Execute sql
+			WriteLogFile("更新WFPEPAY狀態=" & sql)
+			sql = "UPDATE FINDB.dbo.WFPPAYE SET APLSTAT = '" & aplstat & "' WHERE APLNO = '" & aplno & "'"
+			objConnSQLDB.Execute sql
+			WriteLogFile("更新WFPPAYE狀態=" & sql)
+			'------------
+			'寫入新記錄
+			'AS400_sql = "UPDATE GLDLIB.WFPPAYE SET APLSTAT = '" & aplstat & "', PAYDATE = '" & paydate & "', PAYACCT = '" & payacct & "' WHERE APLNO = '" & aplno & "'"
+			'AS400Connection.Execute AS400_sql
+			'WriteLogFile("傳送後GLPAYWEBRQ成功=" & AS400_sql)
+		end if	
+		objRS.MoveNext
+	Loop
+	objRS.Close
+	'On Error Goto 0
+End Sub
+
+Sub SendGLPAYWEBRQ_B(Qdata)
+    'On Error Resume Next
+
+		libName = "GLOLIB"
+		queueName = "GLPAYWEBRQ"
+		Set as400 = CreateObject("cwbx.AS400System")
+		Set dq = CreateObject("cwbx.DataQueue")
+
+		Set objGLPAYWEBRQ = CreateObject("cwbx.Structure")
+		' 定義 objGLPAYWEBRQ 結構
+		objGLPAYWEBRQ.Fields.Append "APLNO", 10
+		objGLPAYWEBRQ.Fields.Append "DATATYPE", 1
+		objGLPAYWEBRQ.Fields.Append "PAYDATE", 8
+		objGLPAYWEBRQ.Fields.Append "PAYACCT", 10
+		objGLPAYWEBRQ.Fields.Append "PUSERID", 5
+		objGLPAYWEBRQ.Fields.Append "APLSTAT", 1
+		objGLPAYWEBRQ.Fields.Append "FILLER", 15			
+
+		as400.Define AS400HostName
+
+		' 僅使用這個程式提供的資訊，
+		' 登入到 AS/400。請確定從未提示使用者輸入登入
+		' 資訊，即使嘗試登入時發生錯誤，也是如此
+		If Not as400.HasSignedOn Then
+			as400.userID = AS400UserID
+			as400.Password = AS400Password
+			as400.PromptMode = cwbcoPromptNever
+			as400.Signon
+		End If
+
+		'設定 DataQueue 存體的 System 特性
+		Set dq.System = as400
+
+		dq.LibraryName = libName
+
+		'設定 QueueName 特性
+		dq.QueueName = queueName
+
+		' Create a StringConverter object to perform Unicode to EBCDIC conversion
+		Set strCvtr = CreateObject("cwbx.StringConverter")
+
+		'strCvtr.CodePage = 3
+
+		dq.Write strCvtr.ToBytes(Qdata)
+		WriteLogFile("傳送後GLPAYWEBRQ成功=" & Qdata)
+		
+		' objGLPAYWEBRQ.Fields.Item("DATATYPE").Value = strCvtr.ToBytes(aplno)
+		' objGLPAYWEBRQ.Fields.Item("DATATYPE").Value = strCvtr.ToBytes(datatype)
+		' objGLPAYWEBRQ.Fields.Item("PAYDATE").Value = strCvtr.ToBytes(paydate)
+		' objGLPAYWEBRQ.Fields.Item("PAYACCT").Value = strCvtr.ToBytes(payacct)
+		' objGLPAYWEBRQ.Fields.Item("PUSERID").Value = strCvtr.ToBytes(puserid)
+		' objGLPAYWEBRQ.Fields.Item("APLSTAT").Value = strCvtr.ToBytes(aplstat)
+		' objGLPAYWEBRQ.Fields.Item("FILLER").Value = strCvtr.ToBytes(space(15))		
+		' 將準備好的資料寫入 DataQueue
+		'dq.Write(objGLPAYWEBRQ.Bytes)
+	'WriteLogFile("傳送後GLPAYWEBRQ成功=" & Qdata)
+
+End Sub
+
+
+
+'費用申請單寫入
+Sub SendGLPAYWEBRQ_A(aplno, exptype)
+    'On Error Resume Next
+    If aplno <> "" then
+
+		libName = "GLOLIB"
+		queueName = "GLPAYWEBRQ"
+		Set as400 = CreateObject("cwbx.AS400System")
+		Set dq = CreateObject("cwbx.DataQueue")
+
+		Set objGLPAYWEBRQ = CreateObject("cwbx.Structure")
+		' 定義 objGLPAYWEBRQ 結構
+		objGLPAYWEBRQ.Fields.Append "APLNO", 10
+		objGLPAYWEBRQ.Fields.Append "DATATYPE", 1
+		objGLPAYWEBRQ.Fields.Append "FILLER", 39
+
+		as400.Define AS400HostName
+
+		' 僅使用這個程式提供的資訊，
+		' 登入到 AS/400。請確定從未提示使用者輸入登入
+		' 資訊，即使嘗試登入時發生錯誤，也是如此
+		If Not as400.HasSignedOn Then
+			as400.userID = AS400UserID
+			as400.Password = AS400Password
+			as400.PromptMode = cwbcoPromptNever
+			as400.Signon
+		End If
+
+		'設定 DataQueue 存體的 System 特性
+		Set dq.System = as400
+
+		dq.LibraryName = libName
+
+		'設定 QueueName 特性
+		dq.QueueName = queueName
+
+		' Create a StringConverter object to perform Unicode to EBCDIC conversion
+		Set strCvtr = CreateObject("cwbx.StringConverter")
+
+		'strCvtr.CodePage = 3
+
+		'dq.Write strCvtr.ToBytes(aplno)
+
+		objGLPAYWEBRQ.Fields.Item("APLNO").Value = strCvtr.ToBytes(aplno)
+		objGLPAYWEBRQ.Fields.Item("DATATYPE").Value = strCvtr.ToBytes("A")
+		objGLPAYWEBRQ.Fields.Item("FILLER").Value = strCvtr.ToBytes(SPACE(39))
+		' 將準備好的資料寫入 DataQueue
+		dq.Write(objGLPAYWEBRQ.Bytes)
+	
+		sql = "SELECT ACCTPROC FROM FINDB.dbo.GLPPAYT WHERE EXPTYPE='" & exptype & "'"
+		objRS2.Open sql, objConnSQLDB, 1, 1
+		if not objRS2.EOF then
+			acctproc = trim(objRS2("ACCTPROC"))
+		end if
+		objRS2.Close
+		if acctproc = "N" then
+			'AS/400不處理帳務, 不會回傳處理值
+			stat = "C"
+		else
+			stat = "6"
+		end if
+
+		'更新資料庫狀態
+		sql = "UPDATE FINDB.dbo.WFPPAYE SET APLSTAT='" & stat & "' WHERE APLNO='" & aplno & "'"
+		objConnSQLDB.Execute sql
+		WriteLogFile ("傳送成功 = " & aplno & " Update FINDB.WFPPAYE: APLSTAT = " & stat)
+
+		' ------------
+		' 更新400資料庫狀態
+		AS400_sql = "UPDATE GLDLIB.WFPPAYE SET APLSTAT = '" & stat & "' WHERE APLNO = '" & aplno & "'"
+		AS400Connection.Execute AS400_sql
+		
+		WriteLogFile ("傳送成功 = " & aplno & " Update GLDLIB.WFPPAYE: APLSTAT = " & stat)
+
+    end if
+
+End Sub
+
+
+'************************************************
+'接收 TAIPEI5\GLOLIB\GLPAYWEBSQ 資料, 並更新 SQLDB\FINDB\WFPPAYE APLSTAT 狀態值
+'************************************************
+' Function ReceiveGLPAYWEBSQ()
+' ON ERROR RESUME NEXT
+	' ReceiveGLPAYWEBSQ_T()
+	' If Err.Number <> 0 then
+		' WriteLogFile("ReceiveGLPAYWEBSQ 發生錯誤:" & Err.Number)
+		' Exit Function
+	' end if
+' On Error Goto 0	
+' End function
+Sub ReceiveGLPAYWEBSQ()
+    ON ERROR RESUME NEXT
+
+    libName = "GLOLIB"
+    queueName = "GLPAYWEBSQ"
+    Set as400 = CreateObject("cwbx.AS400System")
+    Set dq = CreateObject("cwbx.DataQueue")
+
+    as400.Define AS400HostName
+
+    ' 僅使用這個程式提供的資訊，
+    ' 登入到 AS/400。請確定從未提示使用者輸入登入
+    ' 資訊，即使嘗試登入時發生錯誤，也是如此
+    If Not as400.HasSignedOn Then
+        as400.userID = AS400UserID
+        as400.Password = AS400Password
+        as400.PromptMode = cwbcoPromptNever
+    	as400.Signon
+    End If
+
+    'as400.Connect cwbcoServiceDataQueues
+
+    '設定 DataQueue 存體的 System 特性
+    Set dq.System = as400
+
+    '設定 LibraryName 特性。  註：這個檔案庫需要先存在，
+    '方可嘗試在 AS/400 上建立資料佇列。如果
+    '檔案庫不存在，將無法查詢 Exists 特性，
+    '並會發生 cwbdqLibraryNotFound 錯誤 (Command 存體可用來
+    '建立檔案庫)
+    dq.LibraryName = libName
+
+    '設定 QueueName 特性
+    dq.QueueName = queueName
+
+    ' Create a StringConverter object to perform Unicode to EBCDIC conversion
+    Set strCvtr = CreateObject("cwbx.StringConverter")
+
+    ' 設定 MaximumRetrievalLength 特性，因為我們知道佇列上
+    ' 沒有非常長的記錄。這將節省記憶體
+    dq.MaximumRetrievalLength = 370
+    qcounter = 0
+	if (dq.Exists) then
+		peekData = ""
+		peekData = strCvtr.FromBytes(dq.Peek)
+		While Len(peekData) > 0
+			qcounter = qcounter + 1
+			'讀取 AS/400 Data Queue 資料
+			dtaq = strCvtr.FromBytes(dq.Read)
+			dtaq_type = TRIM(MID(dtaq, 1, 1))
+			dtaq_aplno = TRIM(MID(dtaq, 2, 10))
+			dtaq_data = MID(dtaq, 12, 359)
+			WriteLogFile ("Receive dtaq=" & dtaq)
+			if dtaq_type = "A" then
+				'狀態變更通知
+				dtaq_aplstat = left(dtaq_data, 1)
+				dtaq_updated = trim(mid(dtaq_data, 2, 8))
+				dtaq_updatet = trim(mid(dtaq_data,10, 6))
+				dtaq_chgusr = trim(mid(dtaq_data, 16, 5))
+				dtaq_chgrtn = trim(mid(dtaq_data, 21,30))
+				dtaq_paydate = trim(mid(dtaq_data, 51,8))
+				dtaq_payacct = trim(mid(dtaq_data, 59,10))
+				'寫入Log File
+				WriteLogFile ("GLOLIB\GLPAYWEBSQ：TYPE=" & dtaq_type & ", APLNO=" & dtaq_aplno & ", APLSTAT=" & dtaq_aplstat & ", UPDATED=" & dtaq_updated & ", UPDATET=" & dtaq_updatet & ", CHGUSR=" & dtaq_chgusr & ", CHGRTN=" & dtaq_chgrtn & ", PAYDATE=" & dtaq_paydate & ", PAYACCT=" & dtaq_payacct)
+
+				if dtaq_aplno <> "" then
+					'更新 FINDB\WFPPAYE 資料
+					sql = "SELECT * FROM FINDB..WFPPAYE WHERE APLNO='" & dtaq_aplno & "'"
+					objRS.Open sql, objConnSQLDB, 3, 3
+					If Not objRS.EOF Then
+						tmpexptype = trim(objRS("EXPTYPE"))
+						tmpbrhcod = trim(objRS("APLBRHCOD"))
+						objRS("UPDDATED") = dtaq_updated
+						objRS("UPDDATET") = dtaq_updatet
+						objRS("UPDUSER") = dtaq_chgusr
+						objRS("CHGRTN") = dtaq_chgrtn
+						If dtaq_aplstat = " " Then
+							dtaq_aplstat = "7"
+						End If
+						objRS("APLSTAT") = dtaq_aplstat
+						sql = "SELECT ACCTPROC FROM FINDB..GLPPAYT WHERE EXPTYPE='" & tmpexptype & "'"
+						objRS2.Open sql,objConnSQLDB,1,1
+						acctproc = ""
+						if not objRS2.EOF then
+							acctproc = trim(objRS2(0))
+						end if
+						objRS2.Close
+						If dtaq_aplstat = "7"  Then
+							objRS("ACDATED") = CSTR(CLNG(dtaq_updated))
+							objRS("ACDATET") = dtaq_updatet						
+							paydatebcc = ""
+							eformsn = 0
+							caseIdDte = ""
+							'非無帳類新增出納複核作業
+							if acctproc <> "N" and tmpexptype <> "A1" then
+								sqlstr = "SELECT EXPTYPE,(CAST(PAYDATE AS INT) + 19110000) AS PAYDATEBCC, EFORMSN, CreateCaseIdDateTime " & _
+								"FROM FINDB.dbo.WFPPAYE  WHERE APLNO = '" & dtaq_aplno & "'"
+								objRS2.Open sqlstr,objConnSQLDB,1,1
+								if not objRS2.EOF then
+									exptypeno = objRS2(0)
+									paydatebcc = objRS2(1)
+									eformsn = Cstr(objRS2(2))	
+									caseIdDte = Trim(Cstr(objRS2(3)))
+								end if
+								objRS2.Close
+								WriteLogFile("flowtype=" & flowtype & ", caseIdDte=" & caseIdDte & _
+								",len(caseIdDte)=" & len(caseIdDte))
+								if CLng(eformsn) > 0 then
+									if IsNull(caseIdDte) or Len(caseIdDte) <= 0 then
+										'找喬蓬上一級主管關
+										sql = "SELECT TOP 1 UFD1 AS EMPNO,CONVERT(varchar(19), DATETIME, 120) AS DATETIME FROM webflow..FLOWCTL F WITH(NOLOCK) " & _ 
+										"INNER JOIN webflow..USERS U WITH(NOLOCK) ON F.USERID=U.USERID " & _
+										"WHERE  EFORMSN=" & eformsn & " AND STEPSID=676 ORDER BY DATETIME DESC"
+									else
+										'找博格核決關卡
+										sql = "SELECT TOP 1  [HANDLEREMPNO]  ,CONVERT(varchar(19), HANDLEDATETIME, 120) AS DATETIME FROM [FINDB].[dbo].[WFPPAYE_BORGFLOW] WITH(NOLOCK) " & _ 
+										"WHERE APLNO = '" & dtaq_aplno & "' AND RTRIM(STEP)  <>'結束' ORDER BY TASKID DESC"
+									end if
+									objRS2.Open sql,objConnSQLDB,1,1
+									WriteLogFile("找核決關卡(1)" & sql)
+									x = 0
+									redim preserve DTACHKUSR(0)
+									redim preserve DTACHKTIM(0)
+									redim preserve payidArr(0)
+									DTACHKCOUNT = 3
+
+									'強制釋放資源 
+									DTACHKUSR(0) = ""
+									DTACHKTIM(0) = ""
+									Do While not objRS2.EOF
+										redim preserve DTACHKUSR(x)
+										redim preserve DTACHKTIM(x)
+										DTACHKUSR(x) = trim(objRS2(0))
+										DTACHKTIM(x) = trim(objRS2(1))
+										WriteLogFile("APLNO=" & dtaq_aplno & ", DTACHKUSR(x)" & DTACHKUSR(x) & ",DTACHKTIM(x)=" & DTACHKTIM(x))
+										x = x + 1
+										objRS2.MoveNext
+									Loop
+									objRS2.Close	
+									WriteLogFile("DTACHKCOUNT=" & Cstr(DTACHKCOUNT))									
+									OKflag = "Y"
+									for k = 0 to Ubound(DTACHKUSR)
+										if DTACHKUSR(k) = "" then
+											OKflag = "N"
+											WriteLogFile ("單號：" & dtaq_aplno & " EFORMSN=" & eformsn & " 找不到找上一級主管關資料落章 無法傳入出納複核作業")
+											k = Ubound(DTACHKUSR)
+										end if
+									next
+									if OKflag = "N" then
+										if IsNull(caseIdDte) or Len(caseIdDte) <= 0 then
+											'找上一級主管_1關
+											sql = "SELECT TOP 1 UFD1 AS EMPNO,CONVERT(varchar(19), DATETIME, 120) AS DATETIME FROM webflow..FLOWCTL F WITH(NOLOCK) INNER JOIN webflow..USERS U WITH(NOLOCK) ON F.USERID=U.USERID " & _
+											"WHERE  EFORMSN=" & eformsn & " AND STEPSID=677 ORDER BY DATETIME DESC"
+											WriteLogFile("找上一級主管_1關" & sql)
+										end if
+
+										objRS2.Open sql,objConnSQLDB,1,1
+										Do While not objRS2.EOF
+											redim preserve DTACHKUSR(x)
+											redim preserve DTACHKTIM(x)
+											DTACHKUSR(x) = trim(objRS2(0))
+											DTACHKTIM(x) = trim(objRS2(1))
+											x = x + 1
+											objRS2.MoveNext
+										Loop
+										objRS2.Close
+										OKflag = "Y"
+										for k = 0 to Ubound(DTACHKUSR)
+											if DTACHKUSR(k) = "" then
+												OKflag = "N"
+												WriteLogFile ("單號：" & dtaq_aplno & " EFORMSN=" & eformsn & " 找不到找核決關卡資料落章 無法傳入出納複核作業")
+												k = Ubound(DTACHKUSR)
+											end if
+										next										
+									end if
+									if OKflag = "Y" then
+										'判斷受款人全稱若空白則自動更新正確資枓
+										sqlstr = "SELECT COUNT(*) FROM FINDB..WFPPAYEA WHERE   (RTRIM(ACPTERFULLNAME) = '' OR ISNULL(ACPTERFULLNAME, '') = '' ) AND APLNO = '" & dtaq_aplno & "'"
+										objRS2.Open sqlstr,objConnSQLDB,1,1
+										Tflag = "N"
+										if objRS2(0) > 0 then
+											Tflag = "Y"
+										end if
+										objRS2.Close
+										if Tflag = "Y" then
+											'自動更新正確資枓
+											sqlstr = "UPDATE FINDB..WFPPAYEA SET ACPTERFULLNAME = G.CK0050 " & _
+														"FROM FINDB..WFPPAYEA A INNER JOIN FINDB..GLPPAYU G ON A.ACPTER = CK0010 " & _
+													"WHERE  APLNO = '" & dtaq_aplno & "'"
+											objConnSQLDB.Execute(sqlstr)
+											WriteLogFile ("==單號：" & dtaq_aplno & "已更新受款人全稱 " & sqlstr)
+										end if										
+									end if
+									if OKflag = "Y" then
+										'寫入出納複核作業
+										sqlstr = "SELECT ACPTER,ACPTERFULLNAME,APLAMT,PAYTOBNK,PAYTOACT FROM FINDB.dbo.WFPPAYEA WHERE APLNO = '" & dtaq_aplno & "'"
+										WriteLogFile(sqlstr)
+										objRS2.Open sqlstr,objConnSQLDB,1,1
+										Do While not objRS2.EOF 
+											acpterId = trim(objRS2(0))
+											acpterfullname = trim(objRS2(1))
+											payamount = objRS2(2)
+											paytobnk = objRS2(3)
+											paytoact = objRS2(4)
+											NORecord = true
+											sql = "SELECT COUNT(*) FROM FINDB.dbo.WFPEPAY WHERE APLNO = '" & dtaq_aplno & "' AND ACPTER = '" & acpterId & "' AND PAYAMT = " & payamount
+											objRS3.Open sql,objConnSQLDB,1,1
+											WriteLogFile(sql)
+											if objRS3(0) > 0 then
+												NORecord = false
+											end if
+											objRS3.Close
+											if NORecord then
+												sql = "INSERT INTO FINDB.dbo.WFPEPAY (APLNO,PAYDATEBCC,ACPTER,ACPTERFULLNAME,PAYAMT,PAYTOBNK,PAYTOACCTNO,DTASRC,DTATYP,JUDGE,PAYSTATE) " & _
+												" VALUES ('" & dtaq_aplno & "','" & paydatebcc & "','" & acpterId & "','" & acpterfullname & "'," & payamount & ",'" & paytobnk & "','" & paytoact & "','EXP','" & exptypeno & "','OK','')"
+												WriteLogFile(sql)
+												objConnSQLDB.Execute sql
+												sql = "SELECT PAYID FROM FINDB.dbo.WFPEPAY WHERE APLNO ='" & dtaq_aplno & "'"
+												writeLogFile(sql)
+												objRS3.Open sql,objConnSQLDB,1,1
+												i = 0
+												bsreffno = ""
+												Do While not objRS3.EOF
+													redim preserve payidArr(i)
+													payidArr(i) = objRS3(0)
+													i = i + 1
+													objRS3.MoveNext
+												Loop
+												objRS3.Close												
+											end if
+											acpterId = ""
+											acpterfullname = ""
+											payamount = ""
+											paytobnk = ""
+											paytoact = ""	
+											objRS2.MoveNext
+										Loop
+										objRS2.Close
+										sqlstr = "SELECT ACCHGUSR,UPDDATE FROM FINDB.dbo.WFPPAYE WHERE APLNO = '" & dtaq_aplno & "'"
+										objRS2.Open sqlstr,objConnSQLDB,1,1
+										WriteLogFile("找會計複核人員："& sqlstr)
+										if not objRS2.EOF then
+											acchgusr = Left(trim(objRS2("ACCHGUSR")),5)
+
+											upddate = Year(objRS2("UPDDATE")) & "/" & Right("00" & Month(objRS2("UPDDATE")),2) & "/" & Right("00" & Day(objRS2("UPDDATE")),2) & " " &  Right("00" & Hour(objRS2("UPDDATE")),2) & ":" & Right("00" & Minute(objRS2("UPDDATE")),2) & ":" & Right("00" & Second(objRS2("UPDDATE")),2)
+										end if
+										objRS2.Close
+										if DTACHKCOUNT > 0 then
+											for y = 0 to Ubound(payidArr)
+												for k = 0 to Ubound(DTACHKUSR)
+													
+													if IsNull(caseIdDte) or Len(caseIdDte) <= 0 then
+														WriteLogFile("喬蓬的日期=" & DTACHKTIM(k))
+													else
+														WriteLogFile("博格轉換的日期=" & DTACHKTIM(k))
+													end if
+													DTACHKTIME = DTACHKTIM(k)
+													'DTACHKTIME = Year(DTACHKTIM(k)) & "/" &  Right("00" & Month(DTACHKTIM(k)),2) & "/" & Right("00" & Day(DTACHKTIM(k)),2) & " " & Right("00" & Hour(DTACHKTIM(k)),2) & ":" & Right("00" & Minute(DTACHKTIM(k)),2) & ":" & Right("00" & Second(DTACHKTIM(k)),2)
+
+													sql = "UPDATE FINDB.dbo.WFPEPAY SET DTACHKCNT = " & DTACHKCOUNT & ", DTACHKUSR1 = '" & DTACHKUSR(k) & "', DTACHKTIM1 = '" & DTACHKTIME & "' WHERE PAYID =" & payidArr(y)	
+													objConnSQLDB.Execute sql
+													WriteLogFile(sql)
+												next
+												sql = "UPDATE FINDB.dbo.WFPEPAY SET DTACHKUSR2 = '" & acchgusr & "', DTACHKTIM2 = '" & upddate & "' WHERE PAYID =" & payidArr(y)	
+												objConnSQLDB.Execute sql
+												WriteLogFile(sql)
+											next
+										end if
+									end if
+								else
+									WriteLogFile("單號：" & dtaq_aplno & " 找不到EFORMSN編號 無法繼續作資料落章作業也無法傳入出納複核作業")
+								end if
+							end if
+						End If
+						If dtaq_aplstat = "8" Then
+							if CSTR(CLNG(dtaq_paydate))> 7 then
+								dtaq_paydate = RIGHT(dtaq_paydate,7)
+							end if
+							if CSTR(CLNG(dtaq_updated)) > 7 then
+								dtaq_updated = RIGHT(dtaq_updated,7)
+							end if
+							objRS("CADATED") = dtaq_updated
+							objRS("CADATET") = dtaq_updatet
+							objRS("PAYDATE") = dtaq_paydate
+							objRS("PAYACCT") = dtaq_payacct
+							if NOT (tmpexptype = "A1" and tmpbrhcod <> "5850") then
+								SendMailToApplyer dtaq_aplno
+							end if
+						End If
+						If dtaq_aplstat = "9" OR dtaq_aplstat = "F" Then
+							objRS("CACHGUSR") = dtaq_chgusr
+							objRS("UPDATET") = dtaq_updatet
+							objRS("UPDATED") = dtaq_updated	
+							objRS("CHGRTN") = dtaq_chgrtn	
+							
+							' 收到 9 出納複核主檔會計審核為OK
+							sql = "UPDATE FINDB..WFPEPAY SET JUDGE='財務會計退件' WHERE APLNO = '" & dtaq_aplno & "' "
+							objConnSQLDB.Execute sql	
+							
+							UpdateEntertainmentReturn dtaq_aplno,dtaq_chgusr
+						
+						End if		
+						
+						objRS.Update													
+						
+						If dtaq_aplstat = "7" Then
+							' 收到 7 出納複核主檔會計審核為OK
+							sql = "UPDATE FINDB..WFPEPAY SET JUDGE='OK' WHERE APLNO = '" & dtaq_aplno & "'"
+							objConnSQLDB.Execute sql	
+						End if				
+
+						'更新 WFPPAYE 申請單狀態欄位(APLSTAT)
+						as400_sql = "UPDATE GLDLIB.WFPPAYE SET APLSTAT = " & dtaq_aplstat & " WHERE APLNO = '" & dtaq_aplno & "'"
+
+						' 宣告與建立連線物件
+						AS400Connection.Execute as400_sql
+						WriteLogFile ("FINDB\WFPPAYE: APLNO=" & dtaq_aplno & " AS400 已收到")
+					End If
+					objRS.Close
+				else
+					WriteLogFile ("GLPAYWEBSQ 收到 APLNO 是空值")
+				end if
+			elseif dtaq_type = "B" then
+				'分攤明細資料
+				dtaq_aplseq = trim(left(dtaq_data, 3))
+				dtaq_expid  = trim(mid(dtaq_data, 4, 10))
+				dtaq_sharec = trim(mid(dtaq_data, 14, 4))
+				dtaq_compid = trim(mid(dtaq_data, 18, 4))
+				dtaq_deptnum = trim(mid(dtaq_data, 22, 3))
+				dtaq_itemamt = trim(mid(dtaq_data, 25,11))
+
+				'寫入Log File
+				 WriteLogFile ("GLOLIB\GLPAYWEBSQ：TYPE=" & dtaq_type & ", APLNO=" & dtaq_aplno & ", APLSEQ=" & dtaq_aplseq & ", EXPID=" & dtaq_expid & ", SHAREC=" & dtaq_sharec & ", COMPID=" & dtaq_compid & ", DEPTNUM=" & dtaq_deptnum & ", ITEMAMT=" & dtaq_itemamt)
+				if dtaq_aplno <> "" then
+				'讀取公司別及部門別名稱
+				compname = ""
+				deptname = ""
+				if dtaq_compid <> "" then
+
+					'讀取公司名稱
+					sql = "SELECT COMPBNM FROM FINDB..GLPCOMP WHERE COMPID='" & dtaq_compid & "'"
+					objRS.Open sql, objConnSQLDB, 1,1
+					if not objRS.EOF then
+						compname = trim(objRS(0))
+					end if
+					objRS.Close
+
+					'讀取部門別名稱
+					if dtaq_deptnum <> "" then
+						compname = mid(compname, 8, 5)
+						sql = "SELECT FINDB..GLPDEPT.DEPTNAM FROM FINDB..GLPDEPT WHERE COMPID='" & dtaq_compid & "' AND DEPTNUM='" & dtaq_deptnum & "'"
+						objRS.Open sql, objConnSQLDB, 1,1
+						if not objRS.EOF then
+							deptname = trim(left(objRS(0), 8))
+						end if
+						objRS.Close
+					end if
+				end if
+
+				'更新 FINDB\WFPPAYED 資料
+				sql = "SELECT * FROM FINDB..WFPPAYED WHERE APLNO='" & dtaq_aplno & "' AND APLSEQ='" & dtaq_aplseq & "' AND COMPID='" & dtaq_compid & "' AND DEPTNUM='" & dtaq_deptnum & "'"
+				objRS.Open sql, objConnSQLDB, 3, 3
+				If objRS.EOF Then
+				WriteLogFile("APLNO：" & dtaq_aplno & " 開始寫入SQLDB.FINDB.WFPPAYED")				
+					objRS.AddNew
+					objRS("APLNO") = dtaq_aplno
+					objRS("APLSEQ") = dtaq_aplseq
+					objRS("COMPID") = dtaq_compid
+					objRS("DEPTNUM") = dtaq_deptnum
+					objRS("COMPNAME") = compname
+					objRS("DEPTNAME") = deptname
+				End if
+				objRS("ITEMAMT") = dtaq_itemamt
+				objRS.Update
+				WriteLogFile("APLNO：" & dtaq_aplno & " 寫入SQLDB.FINDB.WFPPAYED OK")
+				objRS.Close
+				else
+					WriteLogFile ("GLPAYWEBSQ 收到 APLNO 是空值")
+				end if
+			else
+			   WriteLogFile ("接收的資料類別無法辨識：DATATYPE=" & dtaq_type & ", APLNO=" & dtaq_aplno & ", DATA=" & dtaq_data )
+			end if
+			peekData = ""
+			peekData = strCvtr.FromBytes(dq.Peek)
+		Wend
+	end if
+
+    SET strCvtr = Nothing
+    SET dq = Nothing
+    SET as400 = Nothing
+On Error Goto 0
+End Sub
+
+'****************
+'交際費回復回復
+'****************
+Function UpdateEntertainmentReturn(f_aplno,handler)
+	updateEntertainment="N"
+	sql = "SELECT COUNT(*) FROM FINDB..WFPPAYEH WHERE APLNO = '" & f_aplno & "' AND EXPID IN ('A10006','A0006A','A0006B','A0006C')"
+	set rs = objConnSQLDB.Execute(sql)
+	if rs(0) > 0 then
+		updateEntertainment="Y"
+	end if
+	set rs = nothing
+	if updateEntertainment="Y" then	
+		'更新退件行政單位主管交際費
+		objConnSQLDB.Execute "UPDATE FINDB.ENT.ACTUALUSED SET  ASTATUS = '2' ,MDOR='" & handler & "', MDDA = GETDATE() WHERE PAYNUMBER ='" & f_aplno & "'"	
+		WriteLogFile ("行政單位主管交際費預算回復:" & f_aplno & "成功")	
+		'更新退件業務單位主管交際費
+		Set cmd = CreateObject("ADODB.Command")
+		Set cmd.ActiveConnection = objConnSQLDB
+		cmd.CommandText = "FINDB.Entertainment.UpdateFinanceReturn"
+		cmd.CommandType = 4
+		cmd.Parameters.Append cmd.CreateParameter("@ApplicationNo", 200, 1,10)
+		cmd.Parameters.Append cmd.CreateParameter("@LastModifier", 129,1,50)
+		cmd("@ApplicationNo") = f_aplno
+		cmd("@LastModifier") = handler
+		set rs = cmd.Execute
+		if not rs.EOF then
+		  returnvalue	= trim(rs("ReturnValue"))
+		end if 	
+		if returnvalue = "1" then
+			WriteLogFile ("業務單位主管交際費預算回復:" & f_aplno & "成功")		
+		elseif returnvalue="2" then 
+			WriteLogFile ("查不到被財務部退件的申請單號!!")
+		elseif returnvalue="3" then 
+			WriteLogFile ("無修改者員工編號!!")
+		end if		
+		set rs = nothing
+		set cmd = nothing
+		
+	end if
+End function
+
+'************************************************
+'接收 TAIPEI5\GLOLIB\GLPAYUSQ 資料, 並更新 SQLDB\FINDB\GLPPAYU 資料
+'************************************************
+Sub ReceiveGLPAYUSQ()
+    On Error Resume Next
+
+    libName = "GLOLIB"
+    queueName = "GLPAYUSQ"
+    Set as400 = CreateObject("cwbx.AS400System")
+    Set dq = CreateObject("cwbx.DataQueue")
+
+    Set objGLPAYUSQ = CreateObject("cwbx.Structure")
+
+    ' 定義 objGLPAYUSQ 結構
+    objGLPAYUSQ.Fields.Append "CHGTYP", 1
+    objGLPAYUSQ.Fields.Append "CK0010", 10
+    objGLPAYUSQ.Fields.Append "CK0020", 4
+    objGLPAYUSQ.Fields.Append "CK0030", 3
+    objGLPAYUSQ.Fields.Append "CK0040", 12
+    objGLPAYUSQ.Fields.Append "CK0050", 100
+    objGLPAYUSQ.Fields.Append "CK0060", 72
+    objGLPAYUSQ.Fields.Append "CK0070", 72
+    objGLPAYUSQ.Fields.Append "CK0080", 16
+    objGLPAYUSQ.Fields.Append "CK0090", 16
+    objGLPAYUSQ.Fields.Append "CK0100", 16
+    objGLPAYUSQ.Fields.Append "CK0110", 16
+    objGLPAYUSQ.Fields.Append "CK0120", 16
+    objGLPAYUSQ.Fields.Append "CK0130", 16
+    objGLPAYUSQ.Fields.Append "CK0140", 12
+    objGLPAYUSQ.Fields.Append "CK0960", 6
+    objGLPAYUSQ.Fields.Append "CK1120", 7
+    objGLPAYUSQ.Fields.Append "CK1130", 14
+
+    as400.Define AS400HostName
+
+    ' 僅使用這個程式提供的資訊，
+    ' 登入到 AS/400。請確定從未提示使用者輸入登入
+    ' 資訊，即使嘗試登入時發生錯誤，也是如此
+    If Not as400.HasSignedOn Then
+        as400.userID = AS400UserID
+        as400.Password = AS400Password
+        as400.PromptMode = cwbcoPromptNever
+    	as400.Signon
+    End If
+
+    '設定 DataQueue 存體的 System 特性
+    Set dq.System = as400
+
+    '設定 LibraryName 特性。  註：這個檔案庫需要先存在，
+    '方可嘗試在 AS/400 上建立資料佇列。如果
+    '檔案庫不存在，將無法查詢 Exists 特性，
+    '並會發生 cwbdqLibraryNotFound 錯誤 (Command 存體可用來
+    '建立檔案庫)
+    dq.LibraryName = libName
+
+    '設定 QueueName 特性
+    dq.QueueName = queueName
+
+    ' Create a StringConverter object to perform Unicode to EBCDIC conversion
+    Set strCvtr = CreateObject("cwbx.StringConverter")
+
+    ' 設定 MaximumRetrievalLength 特性，因為我們知道佇列上
+    ' 沒有非常長的記錄。這將節省記憶體
+    dq.MaximumRetrievalLength = 420
+
+    qcounter = 0
+
+    peekData = ""
+    peekData = strCvtr.FromBytes(dq.Peek)
+
+    While Len(peekData) > 0
+       	qcounter = qcounter + 1
+
+        ' 建立完整的物件名稱
+        ' 這些需是空白，填補成 371 個字元
+        strCvtr.Length = 421
+
+      	'讀取 AS/400 Data Queue 資料
+
+		' 設定 objGLPAYUSQ 結構的資料值
+		objGLPAYUSQ.Bytes = dq.Read
+		
+		' 移除已擷取的字串的尾端空白
+		strCvtr.Strip = True
+		
+		' 使用來源位元組陣列中的所有位元組來建立字串
+		strCvtr.Length = 0
+
+		WriteLogFile (strCvtr.FromBytes(objGLPAYUSQ.Bytes))
+
+        ' 從 objGLPAYUSQ 結構擷取欄位值
+       	dtaq_chgtyp = strCvtr.FromBytes(objGLPAYUSQ("CHGTYP").Value)
+       	dtaq_ck0010 = strCvtr.FromBytes(objGLPAYUSQ("CK0010").Value)
+       	dtaq_ck0020 = strCvtr.FromBytes(objGLPAYUSQ("CK0020").Value)
+       	dtaq_ck0030 = strCvtr.FromBytes(objGLPAYUSQ("CK0030").Value)
+       	dtaq_ck0040 = strCvtr.FromBytes(objGLPAYUSQ("CK0040").Value)
+       	dtaq_ck0050 = strCvtr.FromBytes(objGLPAYUSQ("CK0050").Value)
+       	dtaq_ck0060 = strCvtr.FromBytes(objGLPAYUSQ("CK0060").Value)
+       	dtaq_ck0070 = strCvtr.FromBytes(objGLPAYUSQ("CK0070").Value)
+       	dtaq_ck0080 = strCvtr.FromBytes(objGLPAYUSQ("CK0080").Value)
+       	dtaq_ck0090 = strCvtr.FromBytes(objGLPAYUSQ("CK0090").Value)
+       	dtaq_ck0100 = strCvtr.FromBytes(objGLPAYUSQ("CK0100").Value)
+       	dtaq_ck0110 = strCvtr.FromBytes(objGLPAYUSQ("CK0110").Value)
+       	dtaq_ck0120 = strCvtr.FromBytes(objGLPAYUSQ("CK0120").Value)
+       	dtaq_ck0130 = strCvtr.FromBytes(objGLPAYUSQ("CK0130").Value)
+       	dtaq_ck0140 = strCvtr.FromBytes(objGLPAYUSQ("CK0140").Value)
+       	dtaq_ck0960 = strCvtr.FromBytes(objGLPAYUSQ("CK0960").Value)
+       	dtaq_ck1120 = strCvtr.FromBytes(objGLPAYUSQ("CK1120").Value)
+       	dtaq_ck1130 = strCvtr.FromBytes(objGLPAYUSQ("CK1130").Value)
+
+       	'寫入Log File
+		WriteLogFile ("GLOLIB\GLPAYUSQ：變更碼=" & dtaq_chgtyp & ", CK0010=" & dtaq_ck0010 & ", ck0040=" & dtaq_ck0040 & ", ck1120=" & dtaq_ck1120 & ", ck1130=" & dtaq_ck1130)
+
+		if dtaq_chgtyp <> "" and dtaq_ck0010 <> "" then
+			'更新 FINDB\GLPPAYU 資料
+        	sql = "SELECT * FROM FINDB..GLPPAYU WHERE CK0010='" & dtaq_ck0010 & "' AND CK0020='" & dtaq_ck0020 & "'"
+            objRS.Open sql, objConnSQLDB, 3, 3
+			if dtaq_chgtyp = "1" or dtaq_chgtyp = "2" then
+				'變更碼 = "1" (新增)
+	        	If objRS.EOF Then
+				objRS.AddNew
+				objRS("CK0010") = dtaq_ck0010
+				objRS("CK0020") = dtaq_ck0020
+				end if
+				objRS("CK0030") = dtaq_ck0030
+				objRS("CK0040") = dtaq_ck0040
+				objRS("CK0050") = dtaq_ck0050
+				objRS("CK0060") = dtaq_ck0060
+				objRS("CK0070") = dtaq_ck0070
+				objRS("CK0080") = dtaq_ck0080
+				objRS("CK0090") = dtaq_ck0090
+				objRS("CK0100") = dtaq_ck0100
+				objRS("CK0110") = dtaq_ck0110
+				objRS("CK0120") = dtaq_ck0120
+				objRS("CK0130") = dtaq_ck0130
+				objRS("CK0140") = dtaq_ck0140
+				objRS("CK0960") = dtaq_ck0960
+				objRS("CK1120") = dtaq_ck1120
+				objRS("CK1130") = dtaq_ck1130
+			elseif dtaq_chgtyp = "3" then
+				objRS.Delete
+			End If
+			objRS.Update
+			objRS.Close
+		else
+      		WriteLogFile ("GLPAYUSQ 收到 CK0010 是空值, 或變更碼為空白")
+		end if
+
+        peekData = ""
+        peekData = strCvtr.FromBytes(dq.Peek)
+
+    Wend
+
+    Set objGLPAYUSQ = Nothing
+    Set strCvtr = Nothing
+    Set dq = Nothing
+    Set as400 = Nothing
+
+End Sub
+
+Sub ErrorHandler(s)
+    errString=""                 
+    ' 顯示錯誤資訊
+    WriteLogFile ("Error Number = " & Err.Number & vbCrLf & _
+                 "Error Description = " & Err.Description & vbCrLf & _
+                 "Error Source = " & Err.Source & vbCrLf & _
+                 "iSeries Access for Windows Return Code = " & as400.Errors.ReturnCode & vbCrLf)
+    'SendMailJob(eformname & "傳送程式發生錯誤：" & s & "vbCrLf " & Err.Description & "<br>")
+    'WScript.Echo "Error Number = " & Err.Number & vbCrLf & _
+    '             "Error Description = " & Err.Description & vbCrLf & _
+    '             "Error Source = " & Err.Source & vbCrLf & _
+    '             "iSeries Access for Windows Return Code = " & as400.Errors.ReturnCode & vbCrLf
+                 
+    errString = s & "<br>" & "Error Number = " & Err.Number & "<br>" & "Error Description = " & Err.Description & "<br>" &  "iSeries Access for Windows Return Code = " & as400.Errors.ReturnCode 
+    errString = errSting & "AS400元件回傳錯誤：" 
+	' 顯示任何傳回的 iSeries Access for Windows 訊息
+    For Each cwbErr In as400.Errors
+        errString = errSting & cwbErr.Text & vbCrLf
+        'WScript.Echo "iSeries Access for Windows Message Text: " & vbCrLf & cwbErr.Text
+    Next
+     WriteLogFile(errString)   
+   '寄送錯誤訊息給系統管理人員
+    'SendMailJob (errString)
+   
+    ' 清除已處理的錯誤訊息
+    err.Clear
+End Sub
+
+'************************************************
+'寄送付款日期通知電子郵件給申請者
+'************************************************
+sub SendMailToApplyer (aplno)
+
+	SendToFlag = false
+
+        '修改日期：20090811 配合 AS400 民國百年問題.
+	N = NOW
+	EEEE = Right("00" & (Year(N) - 1911), 4)
+	MM = Right("00" & Month(N), 2)
+	DD = Right("00" & Day(N), 2)
+	EEEEMMDD = EEEE & MM & DD
+
+	sql = "SELECT FINDB..WFPPAYE.APLDATE, FINDB..WFPPAYE.APLAMT, FINDB..WFPPAYE.APLEMPNO, FINDB..WFPPAYE.APLEMPNAME, FINDB..WFPPAYE.APLDESC, FINDB..WFPPAYE.CADATED, AS400DB..WFPPERM.ACCOUNT"
+	sql = sql & " FROM FINDB..WFPPAYE"
+	sql = sql & " LEFT OUTER JOIN AS400DB..WFPPERM ON FINDB..WFPPAYE.APLEMPNO=AS400DB..WFPPERM.EMPNO"
+	sql = sql & " WHERE FINDB..WFPPAYE.APLNO='" & aplno & "'"
+	objRS2.Open sql, objConnSQLDB, 1, 1
+	if not objRS2.EOF then
+		apldate = trim(objRS2("APLDATE"))
+		aplamt = trim(objRS2("APLAMT"))
+		aplempno = trim(objRS2("APLEMPNO"))
+		aplempname = trim(objRS2("APLEMPNAME"))
+		apldesc = trim(objRS2("APLDESC"))
+		cadated = trim(objRS2("CADATED"))
+		account = trim(objRS2("ACCOUNT"))
+
+		if cadated <> "" and cadated >= EEEEMMDD then
+			SendToFlag = true
+			apldate = CSTR(apldate \ 10000) & "/" & CSTR((apldate MOD 10000) \ 100) & "/" & CSTR(apldate MOD 100)
+			if len(cadated) > 0 then
+				cadated = CSTR(cadated \ 10000) & "/" & CSTR((cadated MOD 10000) \ 100) & "/" & CSTR(cadated MOD 100)
+			end if
+		end if
+	end if
+	objRS2.Close
+	mBody = ""
+	if SendToFlag and len(account) > 0 and len(cadated) > 0 then
+		mFrom = "400@uni-psg.com (財務部)"
+		mTo = account & "@uni-psg.com"
+		mSubject = apldate & "費用申請付款通知"
+		mBody = "<html><body bgcolor=#dbe6f2><div align=center>" & vbcrlf
+		mBody = mBody & "<table border=0 cellspacing=0 cellpadding=5 bgcolor=#ffcc66 bordercolor=#FF6600 style='border: 1px solid #FF6600'>" & vbcrlf
+		mBody = mBody & "<tr><td><font color=blue>" & aplempname & "</font>  同仁您好：</td></tr>" & vbcrlf
+		mBody = mBody & "<tr><td>" & "您於 " & apldate & " 申請的費用，財務部已處理完畢。</td></tr>" & vbcrlf
+		mBody = mBody & "<tr><td>" & "付款日期為 <font color=blue><b>" & cadated & "</b></font>，僅此通知！</td></tr>" & vbcrlf
+		mBody = mBody & "<tr><td>" & aplno & "</td></tr>" & vbcrlf
+		mBody = mBody & "<tr><td align=right>財務部</td></tr>" & vbcrlf
+		mBody = mBody & "</div></body></html>" & vbcrlf
+
+		'開啟物件
+		Set objCDOMail = CreateObject("CDONTS.NewMail")
+		'設定郵件參數
+		'寄件者
+		objCDOMail.From = mFrom
+		'收件者
+		objCDOMail.To = mTo
+		'密件副本
+		'objCDOMail.Bcc = "smc@uni-psg.com"
+		'郵件主旨
+		objCDOMail.Subject = mSubject
+		'郵件內容
+		objCDOMail.Body = mBody
+		'郵件格式 CDOBodyFormatHTML
+		objCDOMail.BodyFormat = 0
+		objCDOMail.MailFormat = 0
+		'郵件等級(0=Low, 1=Normal, 2=High)
+		objCDOMail.Importance = 1
+		'傳送信件
+		objCDOMail.Send
+		'關閉物件
+		Set objCDOMail = Nothing
+		WriteLogFile(aplno & " 費用申請付款通知, To: " & mTo)
+	end if
+end sub
+
+'************************************************
+'寫入 Log File
+'************************************************
+Sub WriteLogFile(logStr)
+    N = Now
+    YYYY = Year(N)
+    MM = Month(N)
+    If MM < 10 Then MM = "0" & MM
+    DD = Day(N)
+    If DD < 10 Then DD = "0" & DD
+    HH = DatePart("h", N)
+    YYYYMMDD = YYYY & MM & DD
+
+    logfilename = "D:\LOG\Finance\PayFormUpdateWFPPAYE-" & YYYYMMDD & ".LOG"
+    Set logfile = fs.OpenTextFile(logfilename, 8, True, False)
+    logfile.WriteLine N & " " & logStr
+    logfile.Close
+
+    'WScript.Echo (N & " " & logStr)
+End Sub
+
+function clrspace(InputString)
+        clrspace = 0
+        end_flag = "N"
+        StrPoint = 1
+        String1 = InputString
+
+        Do while  end_flag = "N"
+           StrPoint = InStr(StrPoint,String1,unescape("%0D"))
+           if  StrPoint =  0  then
+               end_flag = "Y"
+           else
+               String1 = Replace(String1,unescape("%0D"),"")
+               String1 = Replace(String1,unescape("%0A"),"")
+           end if
+        Loop
+
+        if  String1<>string(len(String1)," ") then
+            String1=Trim(String1)
+            c=asc (String1)
+            if  c = 13 then
+                clrspace=0
+            else
+                Chinum = 0
+                Engnum = 0
+                for  CBNUM = 1  to  len(String1)
+                     if  (Asc(mid(String1,CBNUM,1)) >= 0 and Asc(mid(String1,CBNUM,1)) <= 128)  then
+                         Engnum = Engnum + 1
+                     else
+                         Chinum = Chinum + 1
+                     end if
+                next
+                clrspace = Chinum * 2 + Engnum
+            end if 
+        else
+            clrspace=0
+        end if
+end function
